@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Text;
 using UnityEngine;
 using UnityEngine.Events;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using Object = UnityEngine.Object;
 
@@ -133,5 +134,95 @@ namespace UniverseLib.Utility
 
             return onEndEdit.GetValue(_this, null).TryCast<UnityEvent<string>>();
         }
+    
+        private static readonly MethodInfo getSceneNameInternal = AccessTools.Method(typeof(Scene), "GetNameInternal");
+        private static readonly MethodInfo getSceneHandle = AccessTools.PropertyGetter(typeof(Scene), "handle");
+        private static readonly FieldInfo setSceneHandle = AccessTools.Field(typeof(Scene), "m_Handle");
+        private static MethodInfo sceneHandleToIntConvertor;
+        private static MethodInfo sceneIntToHandleConvertor;
+
+        /// <summary>
+        /// Returns a Scene handle as an int across Unity versions where the
+        /// public handle changed from int to SceneHandle.
+        /// </summary>
+        public static int GetSceneIntHandle(this Scene scene)
+        {
+            string[] split = Application.unityVersion.Split('.');
+            bool assumeNewVersion = int.TryParse(split[0], out int major) && major >= 6000;
+
+            object handle = getSceneHandle.Invoke(scene, []);
+
+            if (assumeNewVersion)
+            {
+                if (sceneIntToHandleConvertor == null)
+                {
+                    Type sceneHandleType = AccessTools.TypeByName("UnityEngine.SceneManagement.SceneHandle");
+                    sceneIntToHandleConvertor = AccessTools.GetDeclaredMethods(sceneHandleType)
+                        .First(x => x.Name == "op_Implicit" &&
+                                    x.GetParameters().Length == 1 &&
+                                    x.GetParameters()[0].ParameterType == sceneHandleType &&
+                                    x.ReturnType == typeof(int));
+                }
+
+                handle = sceneIntToHandleConvertor.Invoke(null, [handle]);
+            }
+
+            return (int)handle!;
+        }
+
+        /// <summary>
+        /// Creates a Scene from an int handle across Unity versions where
+        /// Scene.m_Handle changed from int to SceneHandle.
+        /// </summary>
+        public static Scene CreateSceneFromIntHandle(int sceneHandle)
+        {
+            object scene = new Scene();
+
+            string[] split = Application.unityVersion.Split('.');
+            bool assumeNewVersion = int.TryParse(split[0], out int major) && major >= 6000;
+
+            object handle = sceneHandle;
+
+            if (assumeNewVersion)
+            {
+                if (sceneHandleToIntConvertor == null)
+                    sceneHandleToIntConvertor = AccessTools.Method(
+                        AccessTools.TypeByName("UnityEngine.SceneManagement.SceneHandle"),
+                        "op_Implicit",
+                        [typeof(int)]);
+
+                handle = sceneHandleToIntConvertor.Invoke(null, [handle]);
+            }
+
+            setSceneHandle.SetValue(scene, handle);
+
+            return (Scene)scene;
+        }
+
+        /// <summary>
+        /// Resolves a scene name from an int handle across Unity versions
+        /// where Scene.GetNameInternal expects SceneHandle.
+        /// </summary>
+        public static string GetSceneNameByIntHandle(int sceneHandle)
+        {
+            string[] split = Application.unityVersion.Split('.');
+            bool assumeNewVersion = int.TryParse(split[0], out int major) && major >= 6000;
+
+            object handle = sceneHandle;
+
+            if (assumeNewVersion)
+            {
+                if (sceneHandleToIntConvertor == null)
+                    sceneHandleToIntConvertor = AccessTools.Method(
+                        AccessTools.TypeByName("UnityEngine.SceneManagement.SceneHandle"),
+                        "op_Implicit",
+                        [typeof(int)]);
+
+                handle = sceneHandleToIntConvertor.Invoke(null, [handle]);
+            }
+
+            return (string)getSceneNameInternal.Invoke(null, [handle]);
+        }
+
     }
 }
